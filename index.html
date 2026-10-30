@@ -1789,6 +1789,7 @@
       restoreText();
       mountShared();
       mountStaticCovers();
+      preferRemotePlayers();
       mountCatalogAudio();
       document.addEventListener("input", function (event) {
         var node = event.target.closest ? event.target.closest("[data-edit]") : null;
@@ -2104,10 +2105,11 @@
       }
 
       function coverImage(item) {
+        if (item && item.poster) return item.poster;
         var blob = ((item && item.src) || "") + " " + ((item && item.open) || "");
         var yt = blob.match(/(?:embed\/|youtu\.be\/|vi\/|[?&]v=)([A-Za-z0-9_-]{11})/);
         if (yt) return "https://i.ytimg.com/vi/" + yt[1] + "/hqdefault.jpg";
-        return (item && item.poster) || "";
+        return "";
       }
 
       function mountCover(player, item, play) {
@@ -2167,6 +2169,93 @@
               src: "https://www.youtube-nocookie.com/embed/" + id + "?rel=0&autoplay=1"
             });
           });
+        });
+      }
+
+      var LOCAL_VIDEO_YT = {
+        "videos/cooking.mp4": "eLZ_5B4zHI4",
+        "videos/knight.mp4": "9rXG5xRlrQY",
+        "videos/angel-egg.mp4": "vFrDumgTBco",
+        "videos/feihua.mp4": "tRN5WfnMo-Y",
+        "videos/event-ui.mp4": "_FgqQLCbAIw",
+        "videos/animal.mp4": "g2SfUj4VhLs",
+        "videos/p5x-timeline.mp4": "VIU0QKuGsOM",
+        "videos/p5x-skill.mp4": "p55OlILRdRo",
+        "videos/fps.mp4": "TykdxrJx5qU",
+        "videos/grass.mp4": "VbEDx2MDdMk",
+        "videos/scifi.mp4": "zq_X6h8lfSI",
+        "videos/toilet.mp4": "f5VKwE1nZc0",
+        "videos/wasteland.mp4": "cVMz2tl8FYw",
+        "videos/garden.mp4": "awlzj3FnS7o"
+      };
+
+      function playerTitle(player, video) {
+        var prev = player.previousElementSibling;
+        if (prev && prev.classList && prev.classList.contains("clip-title")) {
+          return (prev.textContent || "").trim() || "播放";
+        }
+        return (video && video.getAttribute("title")) || "播放";
+      }
+
+      function findBaiduNear(player) {
+        var article = player.closest("article") || player.parentNode;
+        if (!article) return "";
+        var links = article.querySelectorAll('a[href*="pan.baidu.com"]');
+        return links.length ? links[0].href : "";
+      }
+
+      function toYoutubePlayer(player, video, id, start) {
+        var title = playerTitle(player, video);
+        var poster = (video && video.getAttribute("poster")) || "";
+        var startQ = start && isFinite(start) && start > 0 ? "&start=" + Math.floor(start) : "";
+        if (video && video.parentNode === player) video.remove();
+        player.setAttribute("data-youtube", id);
+        player.setAttribute("data-title", title);
+        mountCover(player, {
+          title: title,
+          poster: poster,
+          src: "https://www.youtube-nocookie.com/embed/" + id + "?rel=0&autoplay=1" + startQ,
+          open: "https://youtu.be/" + id
+        }, function () {
+          mountIframe(player, {
+            title: title,
+            src: "https://www.youtube-nocookie.com/embed/" + id + "?rel=0&autoplay=1" + startQ
+          });
+        });
+      }
+
+      function toBaiduCover(player, video) {
+        var title = playerTitle(player, video);
+        var poster = (video && video.getAttribute("poster")) || "";
+        var open = findBaiduNear(player);
+        if (!open) return false;
+        if (video && video.parentNode === player) video.remove();
+        mountCover(player, {
+          title: title + " · 百度网盘",
+          poster: poster,
+          open: open
+        }, function () {
+          window.open(open, "_blank", "noopener");
+        });
+        return true;
+      }
+
+      function preferRemotePlayers() {
+        var onPages = /github\.io$/i.test(location.hostname) || /pages\.dev$/i.test(location.hostname);
+        document.querySelectorAll(".player > video[src^='videos/']:not([data-share])").forEach(function (video) {
+          var player = video.parentNode;
+          if (!player || player.querySelector("iframe, .cover")) return;
+          var src = video.getAttribute("src") || "";
+          var id = LOCAL_VIDEO_YT[src] || "";
+          function useRemote() {
+            if (id) toYoutubePlayer(player, video, id);
+            else toBaiduCover(player, video);
+          }
+          if (onPages) {
+            useRemote();
+            return;
+          }
+          video.addEventListener("error", useRemote, { once: true });
         });
       }
 
@@ -2911,19 +3000,30 @@
       bindBannerPull(banner);
       document.querySelectorAll("[data-cue]").forEach(function (btn) {
         btn.addEventListener("click", function () {
-          var video = document.getElementById("angel-egg-video");
           var time = parseFloat(btn.getAttribute("data-cue"));
-          if (!video || !isFinite(time)) return;
-          var jump = function () {
-            var dur = video.duration;
-            video.currentTime = dur && time > dur ? dur : time;
-            var play = video.play();
-            if (play && play.catch) play.catch(function () {});
-          };
-          if (video.readyState >= 1) jump();
-          else {
-            video.addEventListener("loadedmetadata", jump, { once: true });
-            video.load();
+          if (!isFinite(time)) return;
+          var video = document.getElementById("angel-egg-video");
+          var player = document.getElementById("angel-egg");
+          if (video && video.parentNode) {
+            var jump = function () {
+              var dur = video.duration;
+              video.currentTime = dur && time > dur ? dur : time;
+              var play = video.play();
+              if (play && play.catch) play.catch(function () {});
+            };
+            if (video.readyState >= 1) jump();
+            else {
+              video.addEventListener("loadedmetadata", jump, { once: true });
+              video.load();
+            }
+            return;
+          }
+          if (player) {
+            toYoutubePlayer(player, null, "vFrDumgTBco", time);
+            mountIframe(player, {
+              title: player.getAttribute("data-title") || "天使之卵",
+              src: "https://www.youtube-nocookie.com/embed/vFrDumgTBco?rel=0&autoplay=1&start=" + Math.floor(time)
+            });
           }
         });
       });
